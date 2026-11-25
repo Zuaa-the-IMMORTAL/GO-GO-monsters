@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Campus Go Mini — 360° AR Camera Hunt</title>
+  <title>Campus Go Mini — Unlimited 360° AR</title>
 
   <link
     rel="stylesheet"
@@ -15,10 +15,10 @@
   <!-- Layar Sambutan -->
   <section id="intro-screen" class="intro-screen">
     <div class="intro-panel">
-      <div class="tag-pill">360° AR CAMERA SYSTEM</div>
+      <div class="tag-pill">UNLIMITED 360° AR</div>
       <h1>Campus Go Mini</h1>
       <p>
-        Temukan sinyal monster di radar, lalu <strong>putar memegang kamera HP 360°</strong> (termasuk ke belakang) untuk mencari monster, dan lempar <strong>Orb Kristal</strong>!
+        Monster bergerak ke sana kemari di maps dan berlari/terbang di kamera 360°. Kejar arahnya, lempar <strong>Orb Kristal</strong>, dan tangkap monster <strong>unlimited</strong>!
       </p>
       <p class="perm-note">Izinkan Lokasi, Kamera &amp; Sensor Gerak/Kompas HP.</p>
       <button id="start-game-btn" type="button" class="btn-neon">Mulai</button>
@@ -55,7 +55,7 @@
   <!-- Preview Target di Peta -->
   <div id="creature-preview" class="creature-preview hidden">
     <div>
-      <strong id="preview-name">Lumipuff</strong>
+      <strong id="preview-name">Sylvan</strong>
       <p id="preview-dist">Jarak: - m</p>
     </div>
     <div class="target-actions">
@@ -72,17 +72,20 @@
 
     <div class="hunt-header">
       <span id="hunt-title">Mencari 360°...</span>
-      <button id="run-away-btn" type="button" class="btn-escape">Kabur</button>
+      <div class="hunt-top-actions">
+        <button id="back-to-maps-btn" type="button" class="btn-ghost">🗺️ Maps</button>
+        <button id="run-away-btn" type="button" class="btn-escape">Kabur</button>
+      </div>
     </div>
 
     <div class="radar-compass">
-      <span id="compass-text">Arah: 0° • Putar memegang kamera ke sekitar...</span>
+      <span id="compass-text">Arah: 0° • Kejar gerakan monster di sekitar...</span>
     </div>
 
     <div class="ar-stage">
       <canvas id="creature-canvas" width="340" height="340"></canvas>
       <div id="shine-ring" class="shine-ring hidden"></div>
-      <p id="hunt-status" class="hunt-status">Putar kamera HP 360° (kiri, kanan, atau ke belakang)!</p>
+      <p id="hunt-status" class="hunt-status">Kejar monster ke kiri/kanan hingga masuk ke tengah kamera!</p>
     </div>
 
     <div class="orb-dock">

@@ -2,7 +2,7 @@
   "radarRadiusMeters": 65,
   "creatures": [
     {
-      "id": "lumipuff-01",
+      "id": "lumipuff",
       "name": "Lumipuff",
       "species": "Makhluk Bersayap Cahaya",
       "moveType": "fly",
@@ -12,12 +12,12 @@
       "points": 120,
       "evadeChance": 0.45,
       "fleeAfterMisses": 3,
-      "respawnMs": 12000,
+      "respawnMs": 9000,
       "lat": 3.5952,
       "lng": 98.6722
     },
     {
-      "id": "pyrokin-02",
+      "id": "pyrokin",
       "name": "Pyrokin",
       "species": "Anak Naga Terbang Bara",
       "moveType": "fly",
@@ -27,12 +27,12 @@
       "points": 150,
       "evadeChance": 0.55,
       "fleeAfterMisses": 3,
-      "respawnMs": 12000,
+      "respawnMs": 9000,
       "lat": 3.5956,
       "lng": 98.6728
     },
     {
-      "id": "sylvan-03",
+      "id": "sylvan",
       "name": "Sylvan",
       "species": "Rusa Lari Rimba",
       "moveType": "run",
@@ -42,12 +42,12 @@
       "points": 160,
       "evadeChance": 0.5,
       "fleeAfterMisses": 3,
-      "respawnMs": 12000,
+      "respawnMs": 9000,
       "lat": 3.5948,
       "lng": 98.6717
     },
     {
-      "id": "voltix-04",
+      "id": "voltix",
       "name": "Voltix",
       "species": "Kucing Rubah Pelari Gesit",
       "moveType": "run",
@@ -57,7 +57,7 @@
       "points": 170,
       "evadeChance": 0.55,
       "fleeAfterMisses": 3,
-      "respawnMs": 12000,
+      "respawnMs": 9000,
       "lat": 3.5954,
       "lng": 98.6719
     }

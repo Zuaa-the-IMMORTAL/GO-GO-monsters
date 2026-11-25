@@ -60,7 +60,7 @@ button {
 }
 
 .btn-ghost {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.12);
   color: var(--text-main);
 }
 
@@ -240,18 +240,13 @@ button {
   gap: 6px;
 }
 
-.map-orb-marker {
-  width: 28px;
-  height: 28px;
+.map-roaming-marker {
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   border: 2px solid #ffffff;
   box-shadow: 0 0 14px var(--cyan);
-  animation: pulseRadar 1.4s ease-in-out infinite;
-}
-
-@keyframes pulseRadar {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.18); }
+  transition: transform 0.2s ease;
 }
 
 /* Mode Kamera 360° */
@@ -290,9 +285,16 @@ button {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   font-weight: 700;
-  font-size: 14px;
-  background: linear-gradient(to bottom, rgba(2, 5, 10, 0.8), transparent);
+  font-size: 13.5px;
+  background: linear-gradient(to bottom, rgba(2, 5, 10, 0.82), transparent);
+}
+
+.hunt-top-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .radar-compass {
