@@ -1,4 +1,4 @@
-const STORAGE_KEY = "campus_go_unlimited_360_v4";
+const STORAGE_KEY = "campus_go_360_unlimited_full_v5";
 const FALLBACK_COORDS = { lat: 3.5952, lng: 98.6722 };
 
 let map = null;
@@ -243,14 +243,13 @@ function clearActiveCreatures() {
   activeCreatures = [];
 }
 
-// Memunculkan 1 monster baru (unlimited) di sekitar radar
 function spawnSingleUnlimitedCreature(template = null, customAngle = null) {
-  if (!map || !playerCoords || creaturesConfig.length === 0) return;
+  if (!map || !playerCoords || creaturesConfig.length === 0) return null;
 
   const base = template || creaturesConfig[Math.floor(Math.random() * creaturesConfig.length)];
   const num = spawnCounter++;
   const angleRad = Math.random() * Math.PI * 2;
-  const distDeg = 0.00008 + Math.random() * 0.00006;
+  const distDeg = 0.00007 + Math.random() * 0.00005;
 
   const lat = playerCoords.lat + Math.sin(angleRad) * distDeg;
   const lng = playerCoords.lng + Math.cos(angleRad) * distDeg;
@@ -293,7 +292,6 @@ function populateUnlimitedPool(count = 4) {
   }
 }
 
-// Pergerakan monster di peta: pergi ke sana kemari di sekitar radar
 setInterval(() => {
   if (!map || !playerCoords || activeCreatures.length === 0) return;
 
@@ -401,6 +399,21 @@ function stopCameraSessionOnly() {
   ar360.active = false;
 }
 
+function returnToMapsView() {
+  stopCameraSessionOnly();
+  document.getElementById("hunt-view").classList.add("hidden");
+  document.getElementById("creature-preview").classList.add("hidden");
+  selectedCreature = null;
+  isThrowingOrb = false;
+
+  if (map) {
+    map.invalidateSize();
+    if (playerCoords) {
+      map.setView([playerCoords.lat, playerCoords.lng], 18);
+    }
+  }
+}
+
 function sampleCameraMotion() {
   const video = document.getElementById("camera-stream");
   const sampler = document.getElementById("motion-sampler");
@@ -465,6 +478,16 @@ window.addEventListener("deviceorientation", (e) => {
 
   if (e.beta !== null) {
     ar360.cameraPitch = Math.max(-35, Math.min(35, (e.beta - 60) * 0.8));
+  }
+});
+
+// Tombol panah kiri/kanan pada keyboard memudahkan pengujian 360° di laptop
+window.addEventListener("keydown", (e) => {
+  if (!ar360.active || ar360.fleeing || ar360.captured) return;
+  if (e.key === "ArrowLeft") {
+    ar360.cameraYaw = normalize360(ar360.cameraYaw - 12);
+  } else if (e.key === "ArrowRight") {
+    ar360.cameraYaw = normalize360(ar360.cameraYaw + 12);
   }
 });
 
@@ -578,7 +601,7 @@ function getRelativeYaw() {
 
 function isInFrontOfCamera() {
   if (ar360.fleeing || ar360.captured) return false;
-  return Math.abs(getRelativeYaw()) <= 26;
+  return Math.abs(getRelativeYaw()) <= 32;
 }
 
 function update360Hud() {
@@ -609,17 +632,17 @@ function update360Hud() {
     playSound("radarPing", proximity);
   }
 
-  if (absYaw <= 26) {
+  if (absYaw <= 32) {
     compassEl.textContent = `Kamera ${Math.round(ar360.cameraYaw)}° • 🎯 Monster di depan kamera!`;
-    statusEl.textContent = "Kejar & kunci posisi! Ketuk / swipe ↑ Orb Kristal.";
+    statusEl.textContent = "Monster terlihat! Ketuk atau swipe ↑ Orb Kristal.";
   } else if (absYaw > 135) {
     compassEl.textContent = `Kamera ${Math.round(ar360.cameraYaw)}° • 🔄 Monster di BELAKANG (putar kamera!)`;
     statusEl.textContent = "Putar memegang kamera ke belakang untuk mengejar monster!";
-  } else if (relYaw > 26) {
-    compassEl.textContent = `Kamera ${Math.round(ar360.cameraYaw)}° • ↻ Kejar ke KANAN (${Math.round(absYaw)}°)`;
+  } else if (relYaw > 32) {
+    compassEl.textContent = `Kamera ${Math.round(ar360.cameraYaw)}° • ↻ Putar kamera ke KANAN (${Math.round(absYaw)}°)`;
     statusEl.textContent = "Monster bergerak ke kanan—putar kamera mengikuti arahnya!";
   } else {
-    compassEl.textContent = `Kamera ${Math.round(ar360.cameraYaw)}° • ↺ Kejar ke KIRI (${Math.round(absYaw)}°)`;
+    compassEl.textContent = `Kamera ${Math.round(ar360.cameraYaw)}° • ↺ Putar kamera ke KIRI (${Math.round(absYaw)}°)`;
     statusEl.textContent = "Monster bergerak ke kiri—putar kamera mengikuti arahnya!";
   }
 }
@@ -642,9 +665,7 @@ function handleCreatureFledAndSpawnNew(reasonText = "Monster kabur!") {
   spawnSingleUnlimitedCreature(oldTpl);
 
   setTimeout(() => {
-    stopCameraSessionOnly();
-    document.getElementById("hunt-view").classList.add("hidden");
-    selectedCreature = null;
+    returnToMapsView();
   }, 1300);
 }
 
@@ -659,7 +680,7 @@ function evadeToAnotherAngle() {
     return;
   }
 
-  const shift = (Math.random() < 0.5 ? 1 : -1) * (85 + Math.random() * 80);
+  const shift = (Math.random() < 0.5 ? 1 : -1) * (85 + Math.random() * 75);
   ar360.creatureYaw = normalize360(ar360.creatureYaw + shift);
   ar360.roamDir = Math.random() < 0.5 ? 1 : -1;
   playSound("evade");
@@ -680,8 +701,7 @@ function start360Loop() {
     if (ar360.fleeing) {
       ar360.fleeProgress = Math.min(1, ar360.fleeProgress + 0.025);
     } else if (!ar360.captured) {
-      // Monster aktif berlari/meluncur ke kiri & kanan di sekeliling
-      ar360.creatureYaw = normalize360(ar360.creatureYaw + ar360.roamDir * 0.32);
+      ar360.creatureYaw = normalize360(ar360.creatureYaw + ar360.roamDir * 0.28);
       if (Math.sin(ar360.time * 1.4) > 0.96) {
         ar360.roamDir *= -1;
       }
@@ -691,7 +711,7 @@ function start360Loop() {
 
     const relYaw = getRelativeYaw();
     if (selectedCreature && Math.abs(relYaw) <= 65) {
-      const screenX = canvas.width / 2 + (relYaw / 65) * 125;
+      const screenX = canvas.width / 2 + (relYaw / 65) * 120;
       const screenY = canvas.height / 2 + ar360.cameraPitch;
 
       drawAnimal360(
@@ -718,7 +738,7 @@ function start360Loop() {
     if (!ar360.captured && !ar360.fleeing) {
       handleCreatureFledAndSpawnNew("Waktu habis, monster kabur!");
     }
-  }, 20000);
+  }, 22000);
 }
 
 document.getElementById("open-cam-btn").addEventListener("click", async () => {
@@ -764,23 +784,14 @@ document.getElementById("open-cam-btn").addEventListener("click", async () => {
   start360Loop();
 });
 
-// Tombol kembali ke maps kapan saja (monster tetap ada di peta)
 document.getElementById("back-to-maps-btn").addEventListener("click", () => {
   playSound("scan360");
-  stopCameraSessionOnly();
-  document.getElementById("hunt-view").classList.add("hidden");
-  isThrowingOrb = false;
-  if (map && playerCoords) {
-    map.setView([playerCoords.lat, playerCoords.lng], 18);
-  }
+  returnToMapsView();
 });
 
 document.getElementById("run-away-btn").addEventListener("click", () => {
   playSound("fail");
-  stopCameraSessionOnly();
-  document.getElementById("hunt-view").classList.add("hidden");
-  selectedCreature = null;
-  isThrowingOrb = false;
+  returnToMapsView();
 });
 
 function triggerShine() {
@@ -818,7 +829,7 @@ function throwCrystalOrb() {
       return;
     }
 
-    const success = Math.random() < 0.8;
+    const success = Math.random() < 0.82;
     if (success) {
       ar360.captured = true;
       selectedCreature.caught = true;
@@ -836,7 +847,6 @@ function throwCrystalOrb() {
       });
       saveState();
 
-      // Fitur unlimited: langsung munculkan monster baru di radar
       spawnSingleUnlimitedCreature(caughtTpl);
 
       playSound("caught");
@@ -845,10 +855,7 @@ function throwCrystalOrb() {
       statusEl.textContent = `✨ Bersinar! ${caughtTpl.displayName} tertangkap (+${caughtTpl.points} pts)! Monster baru muncul di maps!`;
 
       setTimeout(() => {
-        stopCameraSessionOnly();
-        document.getElementById("hunt-view").classList.add("hidden");
-        selectedCreature = null;
-        isThrowingOrb = false;
+        returnToMapsView();
       }, 1450);
     } else {
       isThrowingOrb = false;
