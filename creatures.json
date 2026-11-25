@@ -1,0 +1,41 @@
+{
+  "radarRadiusMeters": 65,
+  "creatures": [
+    {
+      "id": "lumipuff-01",
+      "name": "Lumipuff",
+      "species": "Makhluk Cahaya Kampus",
+      "coreColor": "#38bdf8",
+      "accentColor": "#fef08a",
+      "points": 120,
+      "evadeChance": 0.45,
+      "fleeAfterMisses": 3,
+      "lat": 3.5952,
+      "lng": 98.6722
+    },
+    {
+      "id": "pyrokin-02",
+      "name": "Pyrokin",
+      "species": "Makhluk Bara Gesit",
+      "coreColor": "#fb923c",
+      "accentColor": "#fde047",
+      "points": 150,
+      "evadeChance": 0.55,
+      "fleeAfterMisses": 3,
+      "lat": 3.5956,
+      "lng": 98.6728
+    },
+    {
+      "id": "sylvan-03",
+      "name": "Sylvan",
+      "species": "Penjaga Tunas Liar",
+      "coreColor": "#34d399",
+      "accentColor": "#a7f3d0",
+      "points": 160,
+      "evadeChance": 0.5,
+      "fleeAfterMisses": 3,
+      "lat": 3.5948,
+      "lng": 98.6717
+    }
+  ]
+}

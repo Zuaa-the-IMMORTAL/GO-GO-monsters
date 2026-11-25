@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Campus Go Mini — AR Search &amp; Catch</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Layar Sambutan -->
+  <section id="intro-screen" class="intro-screen">
+    <div class="intro-panel">
+      <div class="tag-pill">AR CAMERA HUNT</div>
+      <h1>Campus Go Mini</h1>
+      <p>
+        Temukan sinyal monster di radar, buka kamera, lalu <strong>arahkan pandangan sekeliling</strong> untuk mencari monster yang bersembunyi. Monster bisa menghindar atau menghilang!
+      </p>
+      <p class="perm-note">Izinkan akses Lokasi &amp; Kamera.</p>
+      <button id="start-game-btn" type="button" class="btn-neon">Mulai</button>
+    </div>
+  </section>
+
+  <!-- HUD Atas -->
+  <header id="top-hud" class="top-hud hidden">
+    <div class="status-bar">
+      <span id="gps-status" class="status-badge">Menunggu GPS…</span>
+      <span class="score-badge">SKOR <strong id="score-value">0</strong></span>
+    </div>
+    <div class="action-strip">
+      <button id="inv-btn" type="button">🎒 Inventori (<span id="inv-count">0</span>)</button>
+      <button id="radar-btn" type="button">📡 Radar Sekitar</button>
+      <button id="center-btn" type="button">🎯 Pusat</button>
+      <button id="sim-btn" type="button">🚶 Simulasi: OFF</button>
+    </div>
+  </header>
+
+  <!-- Peta Radar -->
+  <main id="map"></main>
+
+  <!-- Pad Simulasi Gerak -->
+  <div id="sim-pad" class="sim-pad hidden">
+    <button type="button" data-dlat="0.00010" data-dlng="0">▲</button>
+    <div class="sim-row">
+      <button type="button" data-dlat="0" data-dlng="-0.00010">◀</button>
+      <button type="button" data-dlat="0" data-dlng="0.00010">▶</button>
+    </div>
+    <button type="button" data-dlat="-0.00010" data-dlng="0">▼</button>
+  </div>
+
+  <!-- Preview Target di Peta -->
+  <div id="creature-preview" class="creature-preview hidden">
+    <div>
+      <strong id="preview-name">Lumipuff</strong>
+      <p id="preview-dist">Jarak: - m</p>
+    </div>
+    <div class="target-actions">
+      <button id="open-cam-btn" type="button" class="btn-capture">Cari di Kamera</button>
+      <button id="close-preview-btn" type="button" class="btn-ghost">Tutup</button>
+    </div>
+  </div>
+
+  <!-- Layar Kamera AR (Cari Sekeliling + Menghindar + Menghilang) -->
+  <section id="hunt-view" class="hunt-view hidden">
+    <video id="camera-stream" autoplay playsinline muted></video>
+    <div class="camera-bg"></div>
+
+    <div class="hunt-header">
+      <span id="hunt-title">Mencari di sekitar...</span>
+      <button id="run-away-btn" type="button" class="btn-escape">Kabur</button>
+    </div>
+
+    <!-- Indikator Arah Mencari Monster di Sekeliling -->
+    <div id="radar-compass" class="radar-compass">
+      <span id="compass-text">Gerakkan HP / geser layar untuk mencari monster...</span>
+    </div>
+
+    <!-- Canvas 3D/Interaktif Monster (bukan JPG statis) -->
+    <div id="ar-stage" class="ar-stage">
+      <canvas id="creature-canvas" width="320" height="320"></canvas>
+      <div id="shine-ring" class="shine-ring hidden"></div>
+      <p id="hunt-status" class="hunt-status">Arahkan pandangan ke arah monster!</p>
+    </div>
+
+    <!-- Orb Kristal -->
+    <div class="orb-dock">
+      <div id="crystal-orb" class="crystal-orb">
+        <div class="orb-inner"></div>
+      </div>
+      <span class="orb-hint">Ketuk / Swipe ↑ Orb Kristal saat monster terlihat</span>
+    </div>
+  </section>
+
+  <!-- Modal Inventori -->
+  <div id="inventory-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-top">
+        <h2>Inventori</h2>
+        <span id="modal-score-info">Skor: 0</span>
+      </div>
+      <ul id="inventory-list" class="inventory-list"></ul>
+      <div class="modal-footer">
+        <button id="close-inv-btn" type="button" class="btn-ghost">Tutup</button>
+        <button id="reset-data-btn" type="button" class="btn-escape">Reset Data</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
