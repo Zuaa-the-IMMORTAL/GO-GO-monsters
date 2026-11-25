@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Campus Go Mini — AR Search &amp; Catch</title>
+  <title>Campus Go Mini — AR Camera Motion</title>
 
   <link
     rel="stylesheet"
@@ -15,12 +15,12 @@
   <!-- Layar Sambutan -->
   <section id="intro-screen" class="intro-screen">
     <div class="intro-panel">
-      <div class="tag-pill">AR CAMERA HUNT</div>
+      <div class="tag-pill">AR CAMERA MOTION</div>
       <h1>Campus Go Mini</h1>
       <p>
-        Temukan sinyal monster di radar, buka kamera, lalu <strong>arahkan pandangan sekeliling</strong> untuk mencari monster yang bersembunyi. Monster bisa menghindar atau menghilang!
+        Cari monster di sekitar dengan <strong>menggerakkan kamera HP</strong>, lalu lempar <strong>Orb Kristal</strong>. Monster bisa berlari atau terbang kabur, dan akan muncul kembali di peta!
       </p>
-      <p class="perm-note">Izinkan akses Lokasi &amp; Kamera.</p>
+      <p class="perm-note">Izinkan akses Lokasi, Kamera &amp; Gerak Perangkat.</p>
       <button id="start-game-btn" type="button" class="btn-neon">Mulai</button>
     </div>
   </section>
@@ -42,7 +42,7 @@
   <!-- Peta Radar -->
   <main id="map"></main>
 
-  <!-- Pad Simulasi Gerak -->
+  <!-- Pad Simulasi Gerak GPS -->
   <div id="sim-pad" class="sim-pad hidden">
     <button type="button" data-dlat="0.00010" data-dlng="0">▲</button>
     <div class="sim-row">
@@ -52,21 +52,22 @@
     <button type="button" data-dlat="-0.00010" data-dlng="0">▼</button>
   </div>
 
-  <!-- Preview Target di Peta -->
+  <!-- Preview Makhluk di Peta -->
   <div id="creature-preview" class="creature-preview hidden">
     <div>
-      <strong id="preview-name">Lumipuff</strong>
+      <strong id="preview-name">Sylvan</strong>
       <p id="preview-dist">Jarak: - m</p>
     </div>
     <div class="target-actions">
-      <button id="open-cam-btn" type="button" class="btn-capture">Cari di Kamera</button>
+      <button id="open-cam-btn" type="button" class="btn-capture">Cari Kamera</button>
       <button id="close-preview-btn" type="button" class="btn-ghost">Tutup</button>
     </div>
   </div>
 
-  <!-- Layar Kamera AR (Cari Sekeliling + Menghindar + Menghilang) -->
+  <!-- Layar Kamera AR -->
   <section id="hunt-view" class="hunt-view hidden">
     <video id="camera-stream" autoplay playsinline muted></video>
+    <canvas id="motion-sampler" width="64" height="48" class="hidden"></canvas>
     <div class="camera-bg"></div>
 
     <div class="hunt-header">
@@ -74,19 +75,16 @@
       <button id="run-away-btn" type="button" class="btn-escape">Kabur</button>
     </div>
 
-    <!-- Indikator Arah Mencari Monster di Sekeliling -->
-    <div id="radar-compass" class="radar-compass">
-      <span id="compass-text">Gerakkan HP / geser layar untuk mencari monster...</span>
+    <div class="radar-compass">
+      <span id="compass-text">Gerakkan kamera HP ke sekitar untuk mencari monster...</span>
     </div>
 
-    <!-- Canvas 3D/Interaktif Monster (bukan JPG statis) -->
-    <div id="ar-stage" class="ar-stage">
-      <canvas id="creature-canvas" width="320" height="320"></canvas>
+    <div class="ar-stage">
+      <canvas id="creature-canvas" width="340" height="340"></canvas>
       <div id="shine-ring" class="shine-ring hidden"></div>
-      <p id="hunt-status" class="hunt-status">Arahkan pandangan ke arah monster!</p>
+      <p id="hunt-status" class="hunt-status">Arahkan kamera ke posisi monster!</p>
     </div>
 
-    <!-- Orb Kristal -->
     <div class="orb-dock">
       <div id="crystal-orb" class="crystal-orb">
         <div class="orb-inner"></div>

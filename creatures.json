@@ -4,38 +4,58 @@
     {
       "id": "lumipuff-01",
       "name": "Lumipuff",
-      "species": "Makhluk Cahaya Kampus",
+      "species": "Makhluk Bersayap Cahaya",
+      "moveType": "fly",
       "coreColor": "#38bdf8",
       "accentColor": "#fef08a",
       "points": 120,
       "evadeChance": 0.45,
       "fleeAfterMisses": 3,
+      "respawnMs": 12000,
       "lat": 3.5952,
       "lng": 98.6722
     },
     {
       "id": "pyrokin-02",
       "name": "Pyrokin",
-      "species": "Makhluk Bara Gesit",
+      "species": "Anak Naga Terbang Bara",
+      "moveType": "fly",
       "coreColor": "#fb923c",
       "accentColor": "#fde047",
       "points": 150,
       "evadeChance": 0.55,
       "fleeAfterMisses": 3,
+      "respawnMs": 12000,
       "lat": 3.5956,
       "lng": 98.6728
     },
     {
       "id": "sylvan-03",
       "name": "Sylvan",
-      "species": "Penjaga Tunas Liar",
+      "species": "Rusa Lari Rimba",
+      "moveType": "run",
       "coreColor": "#34d399",
       "accentColor": "#a7f3d0",
       "points": 160,
       "evadeChance": 0.5,
       "fleeAfterMisses": 3,
+      "respawnMs": 12000,
       "lat": 3.5948,
       "lng": 98.6717
+    },
+    {
+      "id": "voltix-04",
+      "name": "Voltix",
+      "species": "Kucing Rubah Pelari Gesit",
+      "moveType": "run",
+      "coreColor": "#a78bfa",
+      "accentColor": "#f0abfc",
+      "points": 170,
+      "evadeChance": 0.55,
+      "fleeAfterMisses": 3,
+      "respawnMs": 12000,
+      "lat": 3.5954,
+      "lng": 98.6719
     }
   ]
 }

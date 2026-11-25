@@ -1,4 +1,4 @@
-const STORAGE_KEY = "campus_go_ar_search_v1";
+const STORAGE_KEY = "campus_go_ar_motion_v2";
 const FALLBACK_COORDS = { lat: 3.5952, lng: 98.6722 };
 
 let map = null;
@@ -8,21 +8,29 @@ let playerCoords = null;
 let radarRadiusMeters = 65;
 let creaturesConfig = [];
 let mapMarkers = [];
+let respawnTimers = [];
 let selectedCreature = null;
 let cameraStream = null;
 let simulationMode = false;
 let isThrowingOrb = false;
 let audioCtx = null;
 
-// Status pencarian AR di kamera
+// Data untuk mendeteksi gerakan kamera secara optik (perbandingan frame video)
+let prevFrameData = null;
+
 let arSession = {
   active: false,
-  offsetX: 190,     // mulai di luar/sisi pandang agar harus dicari dulu
-  offsetY: -35,
-  targetX: 190,
-  targetY: -35,
+  offsetX: 195,
+  offsetY: -25,
+  targetX: 195,
+  targetY: -25,
+  baseGamma: null,
+  baseBeta: null,
   misses: 0,
-  fled: false,
+  fleeing: false,
+  fleeProgress: 0,
+  fleeDirX: 1,
+  fleeDirY: -0.6,
   captured: false,
   animFrameId: null,
   fleeTimeoutId: null,
@@ -44,10 +52,12 @@ function unlockAudio() {
   }
 }
 
+// Efek suara lengkap (scan, gerak/lari/terbang, lempar, menghindar, kabur, menang)
 function playSound(kind) {
   try {
     unlockAudio();
     if (!audioCtx) return;
+
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     osc.connect(gain);
@@ -56,17 +66,17 @@ function playSound(kind) {
     const now = audioCtx.currentTime;
     if (kind === "scan") {
       osc.type = "sine";
-      osc.frequency.setValueAtTime(440, now);
-      osc.frequency.exponentialRampToValueAtTime(660, now + 0.14);
-      gain.gain.setValueAtTime(0.1, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+      osc.frequency.setValueAtTime(420, now);
+      osc.frequency.exponentialRampToValueAtTime(700, now + 0.16);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
       osc.start(now);
-      osc.stop(now + 0.16);
+      osc.stop(now + 0.18);
     } else if (kind === "throw") {
       osc.type = "sine";
-      osc.frequency.setValueAtTime(350, now);
-      osc.frequency.exponentialRampToValueAtTime(840, now + 0.24);
-      gain.gain.setValueAtTime(0.15, now);
+      osc.frequency.setValueAtTime(340, now);
+      osc.frequency.exponentialRampToValueAtTime(860, now + 0.24);
+      gain.gain.setValueAtTime(0.16, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.26);
       osc.start(now);
       osc.stop(now + 0.26);
@@ -76,26 +86,44 @@ function playSound(kind) {
       osc.frequency.setValueAtTime(659.25, now + 0.11);
       osc.frequency.setValueAtTime(783.99, now + 0.22);
       osc.frequency.setValueAtTime(1046.5, now + 0.34);
-      gain.gain.setValueAtTime(0.2, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+      gain.gain.setValueAtTime(0.22, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.56);
       osc.start(now);
-      osc.stop(now + 0.55);
+      osc.stop(now + 0.56);
     } else if (kind === "evade") {
       osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(320, now);
-      osc.frequency.exponentialRampToValueAtTime(180, now + 0.22);
+      osc.frequency.setValueAtTime(340, now);
+      osc.frequency.exponentialRampToValueAtTime(190, now + 0.22);
       gain.gain.setValueAtTime(0.14, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
       osc.start(now);
       osc.stop(now + 0.24);
+    } else if (kind === "flee_fly") {
+      // Suara meluncur naik/menjauh seperti terbang kabur
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(580, now);
+      osc.frequency.exponentialRampToValueAtTime(220, now + 0.55);
+      gain.gain.setValueAtTime(0.16, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.58);
+      osc.start(now);
+      osc.stop(now + 0.58);
+    } else if (kind === "flee_run") {
+      // Suara langkah cepat menjauh seperti berlari kabur
+      osc.type = "square";
+      osc.frequency.setValueAtTime(260, now);
+      osc.frequency.linearRampToValueAtTime(140, now + 0.45);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.48);
+      osc.start(now);
+      osc.stop(now + 0.48);
     } else {
       osc.type = "sawtooth";
       osc.frequency.setValueAtTime(220, now);
-      osc.frequency.linearRampToValueAtTime(110, now + 0.35);
-      gain.gain.setValueAtTime(0.15, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+      osc.frequency.linearRampToValueAtTime(120, now + 0.28);
+      gain.gain.setValueAtTime(0.13, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
       osc.start(now);
-      osc.stop(now + 0.38);
+      osc.stop(now + 0.3);
     }
   } catch (err) {
     console.warn("Audio gagal:", err);
@@ -151,12 +179,55 @@ async function fetchCreatures() {
 }
 
 function clearMapMarkers() {
-  mapMarkers.forEach((m) => map.removeLayer(m));
+  mapMarkers.forEach((m) => {
+    if (map && m) map.removeLayer(m);
+  });
   mapMarkers = [];
+}
+
+function clearRespawnTimers() {
+  respawnTimers.forEach((id) => clearTimeout(id));
+  respawnTimers = [];
+}
+
+// Menjadwalkan hewan yang kabur agar muncul kembali di peta
+function scheduleRespawn(creature) {
+  const delay = creature.respawnMs || 12000;
+  const timerId = setTimeout(() => {
+    if (!map || !playerCoords) return;
+    const stillCaught = state.caught.some((c) => c.id === creature.id);
+    if (stillCaught) return;
+
+    const angle = Math.random() * Math.PI * 2;
+    const distDeg = 0.00012;
+    const newLat = playerCoords.lat + Math.sin(angle) * distDeg;
+    const newLng = playerCoords.lng + Math.cos(angle) * distDeg;
+
+    const icon = L.divIcon({
+      className: "radar-orb-pin",
+      html: `<div class="map-orb-marker" style="background:${creature.coreColor};"></div>`,
+      iconSize: [28, 28]
+    });
+
+    const marker = L.marker([newLat, newLng], { icon }).addTo(map);
+    mapMarkers.push(marker);
+
+    const revivedObj = {
+      ...creature,
+      lat: newLat,
+      lng: newLng,
+      marker,
+      caught: false
+    };
+    marker.on("click", () => selectCreature(revivedObj));
+  }, delay);
+
+  respawnTimers.push(timerId);
 }
 
 function spawnNearRadar(centerLat, centerLng) {
   clearMapMarkers();
+  clearRespawnTimers();
 
   const offsets = [
     { dLat: 0.00010, dLng: 0.00009 },
@@ -213,8 +284,24 @@ document.getElementById("close-preview-btn").addEventListener("click", () => {
   selectedCreature = null;
 });
 
+// Meminta izin orientasi gerak di iOS bila diperlukan
+async function requestMotionPermissionIfNeeded() {
+  if (
+    typeof DeviceOrientationEvent !== "undefined" &&
+    typeof DeviceOrientationEvent.requestPermission === "function"
+  ) {
+    try {
+      await DeviceOrientationEvent.requestPermission();
+    } catch (e) {
+      console.warn("Izin orientasi perangkat tidak diberikan:", e);
+    }
+  }
+}
+
 async function openCamera() {
   const video = document.getElementById("camera-stream");
+  prevFrameData = null;
+
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({
@@ -235,81 +322,160 @@ function closeCamera() {
     cameraStream = null;
   }
   video.srcObject = null;
+  prevFrameData = null;
+
   if (arSession.animFrameId) cancelAnimationFrame(arSession.animFrameId);
   if (arSession.fleeTimeoutId) clearTimeout(arSession.fleeTimeoutId);
   arSession.active = false;
 }
 
-// Menggambar makhluk 3D-shaded bergerak di canvas (bukan JPG statis)
-function drawCreature3D(ctx, creature, cx, cy, t, alpha = 1) {
-  ctx.save();
-  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-  ctx.translate(cx, cy);
+// Mendeteksi pergerakan kamera secara optik (selisih brightness kiri vs kanan antar-frame)
+function sampleCameraMotion() {
+  const video = document.getElementById("camera-stream");
+  const sampler = document.getElementById("motion-sampler");
+  if (!cameraStream || video.readyState < 2) return;
 
-  const bob = Math.sin(t * 4.2) * 8;
-  const tilt = Math.cos(t * 2.5) * 0.12;
+  const sctx = sampler.getContext("2d", { willReadFrequently: true });
+  sctx.drawImage(video, 0, 0, sampler.width, sampler.height);
+  const frame = sctx.getImageData(0, 0, sampler.width, sampler.height).data;
+
+  if (!prevFrameData) {
+    prevFrameData = new Uint8ClampedArray(frame);
+    return;
+  }
+
+  let diffLeft = 0;
+  let diffRight = 0;
+  const midX = sampler.width / 2;
+
+  for (let y = 0; y < sampler.height; y++) {
+    for (let x = 0; x < sampler.width; x++) {
+      const i = (y * sampler.width + x) * 4;
+      const lumCurr = (frame[i] + frame[i + 1] + frame[i + 2]) / 3;
+      const lumPrev = (prevFrameData[i] + prevFrameData[i + 1] + prevFrameData[i + 2]) / 3;
+      const delta = Math.abs(lumCurr - lumPrev);
+      if (delta > 16) {
+        if (x < midX) diffLeft += delta;
+        else diffRight += delta;
+      }
+    }
+  }
+
+  prevFrameData.set(frame);
+
+  // Jika kamera digerakkan ke kiri/kanan, geser target posisi monster di ruang AR
+  const diffTotal = diffLeft + diffRight;
+  if (diffTotal > 1800 && !arSession.fleeing && !arSession.captured) {
+    const balance = (diffRight - diffLeft) / (diffTotal + 1);
+    arSession.targetX = Math.max(-210, Math.min(210, arSession.targetX - balance * 55));
+  }
+}
+
+// Menggambar hewan yang bisa berlari ("run") atau terbang ("fly") secara alami
+function drawAnimalCreature(ctx, creature, cx, cy, t, fleeProgress = 0, fleeDirX = 1, fleeDirY = -0.6) {
+  const isFly = creature.moveType === "fly";
+
+  // Saat kabur: bergerak menjauh dan mengecil secara alami
+  const fleeScale = 1 - fleeProgress * 0.72;
+  const fleeAlpha = Math.max(0, 1 - fleeProgress);
+  const moveX = cx + fleeProgress * fleeDirX * 190;
+  const moveY = cy + fleeProgress * fleeDirY * 160;
+
+  ctx.save();
+  ctx.globalAlpha = fleeAlpha;
+  ctx.translate(moveX, moveY);
+  ctx.scale(fleeScale, fleeScale);
+
+  // Hadap ke arah gerak kabur bila sedang kabur
+  if (fleeProgress > 0 && Math.abs(fleeDirX) > 0.1) {
+    ctx.scale(fleeDirX < 0 ? -1 : 1, 1);
+  }
+
+  const speedMult = fleeProgress > 0 ? 2.4 : 1;
+  const bob = isFly
+    ? Math.sin(t * 4.5 * speedMult) * 14
+    : Math.abs(Math.sin(t * 6.5 * speedMult)) * -10;
+  const tilt = isFly
+    ? Math.sin(t * 3.5 * speedMult) * 0.18
+    : Math.cos(t * 6.5 * speedMult) * 0.1;
+
   ctx.translate(0, bob);
   ctx.rotate(tilt);
 
-  // Bayangan/aura bawah
-  const aura = ctx.createRadialGradient(0, 10, 8, 0, 10, 75);
-  aura.addColorStop(0, creature.accentColor + "88");
+  // Aura cahaya lembut
+  const aura = ctx.createRadialGradient(0, 8, 8, 0, 8, 72);
+  aura.addColorStop(0, creature.accentColor + "77");
   aura.addColorStop(1, "transparent");
   ctx.fillStyle = aura;
   ctx.beginPath();
-  ctx.arc(0, 10, 75, 0, Math.PI * 2);
+  ctx.arc(0, 8, 72, 0, Math.PI * 2);
   ctx.fill();
 
-  // Tubuh 3D bergradasi
-  const bodyGrad = ctx.createRadialGradient(-16, -22, 10, 0, 0, 56);
+  // Sayap bila tipe terbang ("fly")
+  if (isFly) {
+    const flap = Math.sin(t * 11 * speedMult) * 0.55;
+    [-1, 1].forEach((side) => {
+      ctx.save();
+      ctx.translate(side * 28, -6);
+      ctx.rotate(side * (-0.35 + flap));
+      ctx.fillStyle = creature.accentColor;
+      ctx.beginPath();
+      ctx.ellipse(side * 22, -6, 26, 12, side * -0.25, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  // Badan hewan 3D bergradasi
+  const bodyGrad = ctx.createRadialGradient(-16, -20, 8, 0, 0, 52);
   bodyGrad.addColorStop(0, "#ffffff");
-  bodyGrad.addColorStop(0.25, creature.coreColor);
+  bodyGrad.addColorStop(0.28, creature.coreColor);
   bodyGrad.addColorStop(1, "#0f172a");
 
   ctx.fillStyle = bodyGrad;
   ctx.beginPath();
-  ctx.ellipse(0, 4, 46, 40, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 4, 44, 36, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Telinga / tanduk hewan yang ikut bergerak
-  const earSwing = Math.sin(t * 5.5) * 0.18;
-  [-22, 22].forEach((ex, idx) => {
+  // Telinga / tanduk hewan
+  const earSwing = Math.sin(t * 6 * speedMult) * 0.2;
+  [-1, 1].forEach((side) => {
     ctx.save();
-    ctx.translate(ex, -30);
-    ctx.rotate((idx === 0 ? -0.35 : 0.35) + earSwing);
+    ctx.translate(side * 20, -28);
+    ctx.rotate(side * 0.32 + earSwing);
     ctx.fillStyle = creature.coreColor;
     ctx.beginPath();
-    ctx.ellipse(0, -14, 10, 22, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, -13, 9, 20, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   });
 
-  // Kaki kecil yang melangkah
-  const legStep = Math.sin(t * 6) * 8;
+  // Kaki berlari ("run") atau kaki menggantung ("fly")
+  const stride = Math.sin(t * 10 * speedMult) * (isFly ? 3 : 13);
   ctx.fillStyle = creature.coreColor;
   ctx.beginPath();
-  ctx.arc(-18, 40 + legStep * 0.4, 9, 0, Math.PI * 2);
-  ctx.arc(18, 40 - legStep * 0.4, 9, 0, Math.PI * 2);
+  ctx.arc(-18 + stride, 36, 8.5, 0, Math.PI * 2);
+  ctx.arc(18 - stride, 36, 8.5, 0, Math.PI * 2);
   ctx.fill();
 
-  // Mata ekspresif
+  // Mata
   ctx.fillStyle = "#090d16";
   ctx.beginPath();
-  ctx.arc(-14, -4, 6.5, 0, Math.PI * 2);
-  ctx.arc(14, -4, 6.5, 0, Math.PI * 2);
+  ctx.arc(-13, -4, 6, 0, Math.PI * 2);
+  ctx.arc(13, -4, 6, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = "#ffffff";
   ctx.beginPath();
-  ctx.arc(-16, -6, 2.5, 0, Math.PI * 2);
-  ctx.arc(12, -6, 2.5, 0, Math.PI * 2);
+  ctx.arc(-15, -6, 2.3, 0, Math.PI * 2);
+  ctx.arc(11, -6, 2.3, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
 }
 
 function isCreatureCentered() {
-  if (arSession.fled || arSession.captured) return false;
+  if (arSession.fleeing || arSession.captured) return false;
   return Math.abs(arSession.offsetX) < 55 && Math.abs(arSession.offsetY) < 55;
 }
 
@@ -317,59 +483,77 @@ function updateCompassHint() {
   const compassEl = document.getElementById("compass-text");
   const statusEl = document.getElementById("hunt-status");
 
-  if (arSession.fled) {
-    compassEl.textContent = "Monster menghilang!";
-    statusEl.textContent = "Monster sudah menghilang dari pandangan. Kembali ke radar...";
+  if (arSession.fleeing) {
+    const actionLabel = selectedCreature && selectedCreature.moveType === "fly"
+      ? "terbang menjauh"
+      : "berlari menjauh";
+    compassEl.textContent = `Makhluk ${actionLabel}!`;
+    statusEl.textContent = "Akan muncul kembali di peta beberapa saat lagi...";
     return;
   }
+
   if (arSession.captured) {
     compassEl.textContent = "Tertangkap!";
     return;
   }
 
   if (isCreatureCentered()) {
-    compassEl.textContent = "🎯 Target ditemukan di tengah bidikan!";
-    statusEl.textContent = "Monster terlihat jelas! Ketuk atau swipe ↑ Orb Kristal.";
+    compassEl.textContent = "🎯 Target terlihat di kamera!";
+    statusEl.textContent = "Monster terlihat! Ketuk atau swipe ↑ Orb Kristal.";
   } else if (arSession.offsetX > 55) {
-    compassEl.textContent = "◀ Geser pandangan ke KANAN / arahkan HP ke kanan";
-    statusEl.textContent = "Monster bersembunyi di sisi kanan sekitarmu...";
+    compassEl.textContent = "◀ Arahkan kamera HP ke KANAN untuk mencari";
+    statusEl.textContent = "Gerakkan kamera ke kanan agar monster masuk ke pandangan...";
   } else if (arSession.offsetX < -55) {
-    compassEl.textContent = "▶ Geser pandangan ke KIRI / arahkan HP ke kiri";
-    statusEl.textContent = "Monster bersembunyi di sisi kiri sekitarmu...";
+    compassEl.textContent = "▶ Arahkan kamera HP ke KIRI untuk mencari";
+    statusEl.textContent = "Gerakkan kamera ke kiri agar monster masuk ke pandangan...";
   } else {
-    compassEl.textContent = "↕ Geser pandangan atas/bawah untuk mengunci target";
-    statusEl.textContent = "Cari posisi monster di sekitar layar kamera...";
+    compassEl.textContent = "↕ Gerakkan kamera HP perlahan untuk mengunci target";
+    statusEl.textContent = "Mencari monster di sekitar kamera...";
   }
 }
 
-function evadeCreature(reasonText = "Monster menghindar!") {
-  if (arSession.fled || arSession.captured) return;
+function startFleeAndRespawn(reasonLabel = "Monster kabur!") {
+  if (arSession.fleeing || arSession.captured || !selectedCreature) return;
+
+  arSession.fleeing = true;
+  arSession.fleeProgress = 0;
+  arSession.fleeDirX = Math.random() < 0.5 ? 1 : -1;
+  arSession.fleeDirY = selectedCreature.moveType === "fly" ? -0.95 : 0.25;
+
+  playSound(selectedCreature.moveType === "fly" ? "flee_fly" : "flee_run");
+  updateCompassHint();
+  document.getElementById("hunt-status").textContent =
+    `${reasonLabel} Akan muncul kembali di peta...`;
+
+  if (selectedCreature.marker && map) {
+    map.removeLayer(selectedCreature.marker);
+  }
+  scheduleRespawn(selectedCreature);
+
+  setTimeout(() => {
+    closeCamera();
+    document.getElementById("hunt-view").classList.add("hidden");
+    selectedCreature = null;
+  }, 1350);
+}
+
+function evadeWithinView() {
+  if (arSession.fleeing || arSession.captured || !selectedCreature) return;
 
   arSession.misses += 1;
   const maxMisses = selectedCreature.fleeAfterMisses || 3;
 
   if (arSession.misses >= maxMisses) {
-    arSession.fled = true;
-    playSound("flee");
-    updateCompassHint();
-    if (selectedCreature.marker && map) {
-      map.removeLayer(selectedCreature.marker);
-    }
-    setTimeout(() => {
-      closeCamera();
-      document.getElementById("hunt-view").classList.add("hidden");
-      selectedCreature = null;
-    }, 1500);
+    startFleeAndRespawn(`${selectedCreature.name} menghilang kabur!`);
     return;
   }
 
-  // Menghindar ke arah berlawanan
   const dir = arSession.offsetX >= 0 ? -1 : 1;
-  arSession.targetX = dir * (150 + Math.random() * 60);
-  arSession.targetY = (Math.random() - 0.5) * 90;
+  arSession.targetX = dir * (165 + Math.random() * 45);
+  arSession.targetY = (Math.random() - 0.5) * 80;
   playSound("evade");
   document.getElementById("hunt-status").textContent =
-    `${reasonText} (${arSession.misses}/${maxMisses} sebelum menghilang) — cari lagi!`;
+    `${selectedCreature.name} menghindar (${arSession.misses}/${maxMisses}) — gerakkan kamera lagi!`;
 }
 
 function startArLoop() {
@@ -378,20 +562,30 @@ function startArLoop() {
 
   const render = () => {
     if (!arSession.active) return;
-    arSession.time += 0.03;
+    arSession.time += 0.035;
 
-    // Interpolasi halus saat menghindar atau digeser
-    arSession.offsetX += (arSession.targetX - arSession.offsetX) * 0.14;
-    arSession.offsetY += (arSession.targetY - arSession.offsetY) * 0.14;
+    sampleCameraMotion();
+
+    if (arSession.fleeing) {
+      arSession.fleeProgress = Math.min(1, arSession.fleeProgress + 0.025);
+    } else {
+      arSession.offsetX += (arSession.targetX - arSession.offsetX) * 0.12;
+      arSession.offsetY += (arSession.targetY - arSession.offsetY) * 0.12;
+    }
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const drawX = canvas.width / 2 + arSession.offsetX;
-    const drawY = canvas.height / 2 + arSession.offsetY;
-    const alpha = arSession.fled ? 0 : 1;
-
     if (selectedCreature) {
-      drawCreature3D(ctx, selectedCreature, drawX, drawY, arSession.time, alpha);
+      drawAnimalCreature(
+        ctx,
+        selectedCreature,
+        canvas.width / 2 + arSession.offsetX,
+        canvas.height / 2 + arSession.offsetY,
+        arSession.time,
+        arSession.fleeProgress,
+        arSession.fleeDirX,
+        arSession.fleeDirY
+      );
     }
 
     updateCompassHint();
@@ -400,21 +594,11 @@ function startArLoop() {
 
   arSession.animFrameId = requestAnimationFrame(render);
 
-  // Jika tidak ditangkap dalam 18 detik, monster menghilang
+  // Jika tidak ditangkap dalam 18 detik, monster berlari/terbang menjauh & bisa muncul lagi di peta
   if (arSession.fleeTimeoutId) clearTimeout(arSession.fleeTimeoutId);
   arSession.fleeTimeoutId = setTimeout(() => {
-    if (!arSession.captured && !arSession.fled) {
-      arSession.fled = true;
-      playSound("flee");
-      updateCompassHint();
-      if (selectedCreature && selectedCreature.marker && map) {
-        map.removeLayer(selectedCreature.marker);
-      }
-      setTimeout(() => {
-        closeCamera();
-        document.getElementById("hunt-view").classList.add("hidden");
-        selectedCreature = null;
-      }, 1500);
+    if (!arSession.captured && !arSession.fleeing) {
+      startFleeAndRespawn("Waktu habis, monster kabur!");
     }
   }, 18000);
 }
@@ -422,18 +606,23 @@ function startArLoop() {
 document.getElementById("open-cam-btn").addEventListener("click", async () => {
   if (!selectedCreature) return;
   unlockAudio();
+  await requestMotionPermissionIfNeeded();
   playSound("scan");
 
-  // Mulai di luar tengah agar pengguna harus mencari ke sekeliling dulu
   const startSide = Math.random() < 0.5 ? 195 : -195;
   arSession = {
     active: true,
     offsetX: startSide,
-    offsetY: (Math.random() - 0.5) * 70,
+    offsetY: (Math.random() - 0.5) * 60,
     targetX: startSide,
-    targetY: (Math.random() - 0.5) * 70,
+    targetY: (Math.random() - 0.5) * 60,
+    baseGamma: null,
+    baseBeta: null,
     misses: 0,
-    fled: false,
+    fleeing: false,
+    fleeProgress: 0,
+    fleeDirX: 1,
+    fleeDirY: -0.6,
     captured: false,
     animFrameId: null,
     fleeTimeoutId: null,
@@ -452,65 +641,22 @@ document.getElementById("open-cam-btn").addEventListener("click", async () => {
   startArLoop();
 });
 
-// Geser layar kamera (drag / touch) untuk mencari arah monster di sekeliling
-const huntViewEl = document.getElementById("hunt-view");
-let panStartX = null;
-let panStartY = null;
-
-huntViewEl.addEventListener("touchstart", (e) => {
-  if (e.target.closest("#crystal-orb")) return;
-  panStartX = e.touches[0].clientX;
-  panStartY = e.touches[0].clientY;
-});
-
-huntViewEl.addEventListener("touchmove", (e) => {
-  if (panStartX === null || !arSession.active || arSession.fled) return;
-  const dx = e.touches[0].clientX - panStartX;
-  const dy = e.touches[0].clientY - panStartY;
-  arSession.targetX = Math.max(-220, Math.min(220, arSession.targetX + dx * 0.45));
-  arSession.targetY = Math.max(-110, Math.min(110, arSession.targetY + dy * 0.45));
-  panStartX = e.touches[0].clientX;
-  panStartY = e.touches[0].clientY;
-});
-
-huntViewEl.addEventListener("touchend", () => {
-  panStartX = null;
-  panStartY = null;
-});
-
-// Dukungan mouse drag di desktop untuk menguji mencari monster di sekeliling
-let mousePanning = false;
-let lastMouseX = 0;
-let lastMouseY = 0;
-
-huntViewEl.addEventListener("mousedown", (e) => {
-  if (e.target.closest("#crystal-orb") || e.target.closest("button")) return;
-  mousePanning = true;
-  lastMouseX = e.clientX;
-  lastMouseY = e.clientY;
-});
-
-window.addEventListener("mousemove", (e) => {
-  if (!mousePanning || !arSession.active || arSession.fled) return;
-  const dx = e.clientX - lastMouseX;
-  const dy = e.clientY - lastMouseY;
-  arSession.targetX = Math.max(-220, Math.min(220, arSession.targetX + dx * 0.7));
-  arSession.targetY = Math.max(-110, Math.min(110, arSession.targetY + dy * 0.7));
-  lastMouseX = e.clientX;
-  lastMouseY = e.clientY;
-});
-
-window.addEventListener("mouseup", () => {
-  mousePanning = false;
-});
-
-// Dukungan giroskop HP (DeviceOrientation) agar menggerakkan HP ikut menggeser arah pandang
+// Gerakan orientasi kamera/perangkat HP (DeviceOrientationEvent)
 window.addEventListener("deviceorientation", (e) => {
-  if (!arSession.active || arSession.fled || e.gamma === null) return;
-  arSession.targetX = Math.max(-210, Math.min(210, e.gamma * 5.5));
-  if (e.beta !== null) {
-    arSession.targetY = Math.max(-100, Math.min(100, (e.beta - 55) * 2.5));
+  if (!arSession.active || arSession.fleeing || e.gamma === null) return;
+
+  if (arSession.baseGamma === null) {
+    arSession.baseGamma = e.gamma;
+    arSession.baseBeta = e.beta !== null ? e.beta : 60;
   }
+
+  const deltaGamma = e.gamma - arSession.baseGamma;
+  const deltaBeta = e.beta !== null ? e.beta - arSession.baseBeta : 0;
+
+  arSession.targetX = Math.max(-210, Math.min(210, arSession.targetX - deltaGamma * 0.35));
+  arSession.targetY = Math.max(-100, Math.min(100, arSession.targetY - deltaBeta * 0.2));
+  arSession.baseGamma = e.gamma;
+  if (e.beta !== null) arSession.baseBeta = e.beta;
 });
 
 document.getElementById("run-away-btn").addEventListener("click", () => {
@@ -528,11 +674,11 @@ function triggerShine() {
 }
 
 function throwCrystalOrb() {
-  if (!selectedCreature || isThrowingOrb || arSession.fled || arSession.captured) return;
+  if (!selectedCreature || isThrowingOrb || arSession.fleeing || arSession.captured) return;
 
   const statusEl = document.getElementById("hunt-status");
   if (!isCreatureCentered()) {
-    statusEl.textContent = "Arahkan bidikan ke tengah monster dulu sebelum melempar!";
+    statusEl.textContent = "Gerakkan kamera HP hingga monster berada di tengah bidikan!";
     playSound("fail");
     return;
   }
@@ -548,15 +694,14 @@ function throwCrystalOrb() {
   setTimeout(() => {
     orb.classList.remove("orb-throwing");
 
-    // Jika menghindar saat dilempar
     const evaded = Math.random() < (selectedCreature.evadeChance || 0.45);
     if (evaded) {
       isThrowingOrb = false;
-      evadeCreature("Monster menghindar gesit!");
+      evadeWithinView();
       return;
     }
 
-    const success = Math.random() < 0.75;
+    const success = Math.random() < 0.78;
     if (success) {
       arSession.captured = true;
       selectedCreature.caught = true;
@@ -587,7 +732,7 @@ function throwCrystalOrb() {
       }, 1350);
     } else {
       isThrowingOrb = false;
-      evadeCreature("Lemparan meleset & monster bergeser!");
+      evadeWithinView();
     }
   }, 650);
 }
@@ -725,6 +870,7 @@ function startLocationTracking() {
 
 document.getElementById("start-game-btn").addEventListener("click", async () => {
   unlockAudio();
+  await requestMotionPermissionIfNeeded();
   document.getElementById("intro-screen").classList.add("hidden");
   document.getElementById("top-hud").classList.remove("hidden");
 
