@@ -254,7 +254,7 @@ button {
   50% { transform: scale(1.18); }
 }
 
-/* Mode Kamera AR */
+/* Mode Kamera 360° */
 .hunt-view {
   position: fixed;
   inset: 0;

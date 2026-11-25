@@ -1,4 +1,4 @@
-const STORAGE_KEY = "campus_go_ar_motion_v2";
+const STORAGE_KEY = "campus_go_360_ar_v3";
 const FALLBACK_COORDS = { lat: 3.5952, lng: 98.6722 };
 
 let map = null;
@@ -15,17 +15,17 @@ let simulationMode = false;
 let isThrowingOrb = false;
 let audioCtx = null;
 
-// Data untuk mendeteksi gerakan kamera secara optik (perbandingan frame video)
 let prevFrameData = null;
+let lastPingTime = 0;
 
-let arSession = {
+let ar360 = {
   active: false,
-  offsetX: 195,
-  offsetY: -25,
-  targetX: 195,
-  targetY: -25,
-  baseGamma: null,
-  baseBeta: null,
+  cameraYaw: 0,       // sudut arah kamera 0..360 derajat
+  cameraPitch: 0,     // kemiringan atas/bawah
+  creatureYaw: 180,   // sudut makhluk di sekeliling 0..360 (180 = di belakang)
+  baseAlpha: null,
+  lastGamma: null,
+  lastBeta: null,
   misses: 0,
   fleeing: false,
   fleeProgress: 0,
@@ -42,6 +42,18 @@ let state = {
   caught: []
 };
 
+function normalize360(deg) {
+  return ((deg % 360) + 360) % 360;
+}
+
+// Selisih sudut terpendek dalam rentang -180..+180 derajat
+function signedAngleDiff(targetDeg, currentDeg) {
+  let diff = normalize360(targetDeg) - normalize360(currentDeg);
+  if (diff > 180) diff -= 360;
+  if (diff < -180) diff += 360;
+  return diff;
+}
+
 function unlockAudio() {
   if (!audioCtx) {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -52,76 +64,125 @@ function unlockAudio() {
   }
 }
 
-// Efek suara lengkap (scan, gerak/lari/terbang, lempar, menghindar, kabur, menang)
-function playSound(kind) {
+// Efek suara game, radar 360, lempar orb, kabur, dan tangkapan berhasil
+function playSound(kind, intensity = 0.5) {
   try {
     unlockAudio();
     if (!audioCtx) return;
 
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-
     const now = audioCtx.currentTime;
-    if (kind === "scan") {
+
+    if (kind === "start") {
+      [440, 554.37, 659.25].forEach((freq, i) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(freq, now + i * 0.08);
+        gain.gain.setValueAtTime(0.14, now + i * 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.22);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now + i * 0.08);
+        osc.stop(now + i * 0.08 + 0.24);
+      });
+    } else if (kind === "scan360") {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
       osc.type = "sine";
-      osc.frequency.setValueAtTime(420, now);
-      osc.frequency.exponentialRampToValueAtTime(700, now + 0.16);
-      gain.gain.setValueAtTime(0.12, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+      osc.frequency.setValueAtTime(300, now);
+      osc.frequency.exponentialRampToValueAtTime(760, now + 0.28);
+      gain.gain.setValueAtTime(0.14, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
       osc.start(now);
-      osc.stop(now + 0.18);
+      osc.stop(now + 0.32);
+    } else if (kind === "radarPing") {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      const freq = 420 + intensity * 460;
+      osc.frequency.setValueAtTime(freq, now);
+      gain.gain.setValueAtTime(0.07 + intensity * 0.06, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.09);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + 0.1);
     } else if (kind === "throw") {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
       osc.type = "sine";
       osc.frequency.setValueAtTime(340, now);
-      osc.frequency.exponentialRampToValueAtTime(860, now + 0.24);
+      osc.frequency.exponentialRampToValueAtTime(920, now + 0.25);
       gain.gain.setValueAtTime(0.16, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.26);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.27);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
       osc.start(now);
-      osc.stop(now + 0.26);
-    } else if (kind === "win") {
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(523.25, now);
-      osc.frequency.setValueAtTime(659.25, now + 0.11);
-      osc.frequency.setValueAtTime(783.99, now + 0.22);
-      osc.frequency.setValueAtTime(1046.5, now + 0.34);
-      gain.gain.setValueAtTime(0.22, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.56);
-      osc.start(now);
-      osc.stop(now + 0.56);
+      osc.stop(now + 0.28);
+    } else if (kind === "caught") {
+      // Fanfare efek suara makhluk tertangkap
+      const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+      notes.forEach((freq, idx) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = idx === notes.length - 1 ? "sine" : "triangle";
+        const startAt = now + idx * 0.09;
+        osc.frequency.setValueAtTime(freq, startAt);
+        gain.gain.setValueAtTime(0.18, startAt);
+        gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.34);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(startAt);
+        osc.stop(startAt + 0.36);
+      });
     } else if (kind === "evade") {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
       osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(340, now);
-      osc.frequency.exponentialRampToValueAtTime(190, now + 0.22);
+      osc.frequency.setValueAtTime(360, now);
+      osc.frequency.exponentialRampToValueAtTime(185, now + 0.22);
       gain.gain.setValueAtTime(0.14, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
       osc.start(now);
-      osc.stop(now + 0.24);
+      osc.stop(now + 0.25);
     } else if (kind === "flee_fly") {
-      // Suara meluncur naik/menjauh seperti terbang kabur
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
       osc.type = "sine";
-      osc.frequency.setValueAtTime(580, now);
-      osc.frequency.exponentialRampToValueAtTime(220, now + 0.55);
+      osc.frequency.setValueAtTime(620, now);
+      osc.frequency.exponentialRampToValueAtTime(210, now + 0.55);
       gain.gain.setValueAtTime(0.16, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.58);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
       osc.start(now);
-      osc.stop(now + 0.58);
+      osc.stop(now + 0.6);
     } else if (kind === "flee_run") {
-      // Suara langkah cepat menjauh seperti berlari kabur
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
       osc.type = "square";
-      osc.frequency.setValueAtTime(260, now);
-      osc.frequency.linearRampToValueAtTime(140, now + 0.45);
+      osc.frequency.setValueAtTime(270, now);
+      osc.frequency.linearRampToValueAtTime(135, now + 0.45);
       gain.gain.setValueAtTime(0.1, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.48);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
       osc.start(now);
-      osc.stop(now + 0.48);
+      osc.stop(now + 0.5);
     } else {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
       osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(220, now);
-      osc.frequency.linearRampToValueAtTime(120, now + 0.28);
+      osc.frequency.setValueAtTime(230, now);
+      osc.frequency.linearRampToValueAtTime(125, now + 0.26);
       gain.gain.setValueAtTime(0.13, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
       osc.start(now);
       osc.stop(now + 0.3);
     }
@@ -190,7 +251,6 @@ function clearRespawnTimers() {
   respawnTimers = [];
 }
 
-// Menjadwalkan hewan yang kabur agar muncul kembali di peta
 function scheduleRespawn(creature) {
   const delay = creature.respawnMs || 12000;
   const timerId = setTimeout(() => {
@@ -214,6 +274,7 @@ function scheduleRespawn(creature) {
 
     const revivedObj = {
       ...creature,
+      spawnAngleDeg: Math.floor(Math.random() * 360),
       lat: newLat,
       lng: newLng,
       marker,
@@ -261,6 +322,7 @@ function spawnNearRadar(centerLat, centerLng) {
 function selectCreature(creature) {
   if (creature.caught || !playerCoords) return;
   selectedCreature = creature;
+  playSound("scan360");
 
   const dist = distanceMeters(
     playerCoords.lat,
@@ -272,7 +334,7 @@ function selectCreature(creature) {
 
   document.getElementById("preview-name").textContent = `${creature.name} (+${creature.points})`;
   document.getElementById("preview-dist").textContent = inRange
-    ? `Jarak ${Math.round(dist)}m • Sinyal terdeteksi di dekat radar`
+    ? `Jarak ${Math.round(dist)}m • Sinyal 360° aktif di sekitar radar`
     : `Jarak ${Math.round(dist)}m • Mendekat ke radar (${radarRadiusMeters}m)`;
 
   document.getElementById("open-cam-btn").disabled = !inRange;
@@ -284,8 +346,7 @@ document.getElementById("close-preview-btn").addEventListener("click", () => {
   selectedCreature = null;
 });
 
-// Meminta izin orientasi gerak di iOS bila diperlukan
-async function requestMotionPermissionIfNeeded() {
+async function requestOrientationPermission() {
   if (
     typeof DeviceOrientationEvent !== "undefined" &&
     typeof DeviceOrientationEvent.requestPermission === "function"
@@ -293,7 +354,7 @@ async function requestMotionPermissionIfNeeded() {
     try {
       await DeviceOrientationEvent.requestPermission();
     } catch (e) {
-      console.warn("Izin orientasi perangkat tidak diberikan:", e);
+      console.warn("Izin sensor orientasi ditolak:", e);
     }
   }
 }
@@ -311,7 +372,7 @@ async function openCamera() {
     video.srcObject = cameraStream;
     await video.play();
   } catch (err) {
-    console.warn("Kamera tidak aktif, pakai latar AR:", err);
+    console.warn("Kamera tidak aktif, pakai latar 360°:", err);
   }
 }
 
@@ -329,11 +390,11 @@ function closeCamera() {
   arSession.active = false;
 }
 
-// Mendeteksi pergerakan kamera secara optik (selisih brightness kiri vs kanan antar-frame)
+// Deteksi pergerakan kamera secara optik saat kamera digerakkan ke kiri/kanan
 function sampleCameraMotion() {
   const video = document.getElementById("camera-stream");
   const sampler = document.getElementById("motion-sampler");
-  if (!cameraStream || video.readyState < 2) return;
+  if (!cameraStream || video.readyState < 2 || ar360.fleeing || ar360.captured) return;
 
   const sctx = sampler.getContext("2d", { willReadFrequently: true });
   sctx.drawImage(video, 0, 0, sampler.width, sampler.height);
@@ -363,30 +424,53 @@ function sampleCameraMotion() {
 
   prevFrameData.set(frame);
 
-  // Jika kamera digerakkan ke kiri/kanan, geser target posisi monster di ruang AR
   const diffTotal = diffLeft + diffRight;
-  if (diffTotal > 1800 && !arSession.fleeing && !arSession.captured) {
+  if (diffTotal > 1900) {
     const balance = (diffRight - diffLeft) / (diffTotal + 1);
-    arSession.targetX = Math.max(-210, Math.min(210, arSession.targetX - balance * 55));
+    ar360.cameraYaw = normalize360(ar360.cameraYaw - balance * 8);
   }
 }
 
-// Menggambar hewan yang bisa berlari ("run") atau terbang ("fly") secara alami
-function drawAnimalCreature(ctx, creature, cx, cy, t, fleeProgress = 0, fleeDirX = 1, fleeDirY = -0.6) {
-  const isFly = creature.moveType === "fly";
+// Sensor putar 360° HP (kompas alpha + rotasi gamma/beta)
+window.addEventListener("deviceorientation", (e) => {
+  if (!ar360.active || ar360.fleeing || ar360.captured) return;
 
-  // Saat kabur: bergerak menjauh dan mengecil secara alami
+  if (typeof e.webkitCompassHeading === "number" && !Number.isNaN(e.webkitCompassHeading)) {
+    ar360.cameraYaw = normalize360(e.webkitCompassHeading);
+  } else if (e.alpha !== null) {
+    if (ar360.baseAlpha === null) {
+      ar360.baseAlpha = e.alpha;
+    }
+    const deltaAlpha = e.alpha - ar360.baseAlpha;
+    ar360.cameraYaw = normalize360(ar360.cameraYaw + deltaAlpha * 0.25);
+    ar360.baseAlpha = e.alpha;
+  }
+
+  if (e.gamma !== null) {
+    if (ar360.lastGamma !== null) {
+      const dGamma = e.gamma - ar360.lastGamma;
+      ar360.cameraYaw = normalize360(ar360.cameraYaw + dGamma * 0.55);
+    }
+    ar360.lastGamma = e.gamma;
+  }
+
+  if (e.beta !== null) {
+    ar360.cameraPitch = Math.max(-35, Math.min(35, (e.beta - 60) * 0.8));
+  }
+});
+
+function drawAnimal360(ctx, creature, screenX, screenY, t, fleeProgress = 0, fleeDirX = 1, fleeDirY = -0.6) {
+  const isFly = creature.moveType === "fly";
   const fleeScale = 1 - fleeProgress * 0.72;
   const fleeAlpha = Math.max(0, 1 - fleeProgress);
-  const moveX = cx + fleeProgress * fleeDirX * 190;
-  const moveY = cy + fleeProgress * fleeDirY * 160;
+  const drawX = screenX + fleeProgress * fleeDirX * 190;
+  const drawY = screenY + fleeProgress * fleeDirY * 160;
 
   ctx.save();
   ctx.globalAlpha = fleeAlpha;
-  ctx.translate(moveX, moveY);
+  ctx.translate(drawX, drawY);
   ctx.scale(fleeScale, fleeScale);
 
-  // Hadap ke arah gerak kabur bila sedang kabur
   if (fleeProgress > 0 && Math.abs(fleeDirX) > 0.1) {
     ctx.scale(fleeDirX < 0 ? -1 : 1, 1);
   }
@@ -402,7 +486,6 @@ function drawAnimalCreature(ctx, creature, cx, cy, t, fleeProgress = 0, fleeDirX
   ctx.translate(0, bob);
   ctx.rotate(tilt);
 
-  // Aura cahaya lembut
   const aura = ctx.createRadialGradient(0, 8, 8, 0, 8, 72);
   aura.addColorStop(0, creature.accentColor + "77");
   aura.addColorStop(1, "transparent");
@@ -411,7 +494,6 @@ function drawAnimalCreature(ctx, creature, cx, cy, t, fleeProgress = 0, fleeDirX
   ctx.arc(0, 8, 72, 0, Math.PI * 2);
   ctx.fill();
 
-  // Sayap bila tipe terbang ("fly")
   if (isFly) {
     const flap = Math.sin(t * 11 * speedMult) * 0.55;
     [-1, 1].forEach((side) => {
@@ -426,7 +508,6 @@ function drawAnimalCreature(ctx, creature, cx, cy, t, fleeProgress = 0, fleeDirX
     });
   }
 
-  // Badan hewan 3D bergradasi
   const bodyGrad = ctx.createRadialGradient(-16, -20, 8, 0, 0, 52);
   bodyGrad.addColorStop(0, "#ffffff");
   bodyGrad.addColorStop(0.28, creature.coreColor);
@@ -437,7 +518,6 @@ function drawAnimalCreature(ctx, creature, cx, cy, t, fleeProgress = 0, fleeDirX
   ctx.ellipse(0, 4, 44, 36, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // Telinga / tanduk hewan
   const earSwing = Math.sin(t * 6 * speedMult) * 0.2;
   [-1, 1].forEach((side) => {
     ctx.save();
@@ -450,7 +530,6 @@ function drawAnimalCreature(ctx, creature, cx, cy, t, fleeProgress = 0, fleeDirX
     ctx.restore();
   });
 
-  // Kaki berlari ("run") atau kaki menggantung ("fly")
   const stride = Math.sin(t * 10 * speedMult) * (isFly ? 3 : 13);
   ctx.fillStyle = creature.coreColor;
   ctx.beginPath();
@@ -458,7 +537,6 @@ function drawAnimalCreature(ctx, creature, cx, cy, t, fleeProgress = 0, fleeDirX
   ctx.arc(18 - stride, 36, 8.5, 0, Math.PI * 2);
   ctx.fill();
 
-  // Mata
   ctx.fillStyle = "#090d16";
   ctx.beginPath();
   ctx.arc(-13, -4, 6, 0, Math.PI * 2);
@@ -474,56 +552,71 @@ function drawAnimalCreature(ctx, creature, cx, cy, t, fleeProgress = 0, fleeDirX
   ctx.restore();
 }
 
-function isCreatureCentered() {
-  if (arSession.fleeing || arSession.captured) return false;
-  return Math.abs(arSession.offsetX) < 55 && Math.abs(arSession.offsetY) < 55;
+function getRelativeYaw() {
+  return signedAngleDiff(ar360.creatureYaw, ar360.cameraYaw);
 }
 
-function updateCompassHint() {
+function isInFrontOfCamera() {
+  if (ar360.fleeing || ar360.captured) return false;
+  return Math.abs(getRelativeYaw()) <= 24;
+}
+
+function update360Hud() {
   const compassEl = document.getElementById("compass-text");
   const statusEl = document.getElementById("hunt-status");
+  const relYaw = getRelativeYaw();
+  const absYaw = Math.abs(relYaw);
 
-  if (arSession.fleeing) {
-    const actionLabel = selectedCreature && selectedCreature.moveType === "fly"
+  if (ar360.fleeing) {
+    const moveDesc = selectedCreature && selectedCreature.moveType === "fly"
       ? "terbang menjauh"
       : "berlari menjauh";
-    compassEl.textContent = `Makhluk ${actionLabel}!`;
-    statusEl.textContent = "Akan muncul kembali di peta beberapa saat lagi...";
+    compassEl.textContent = `Arah ${Math.round(ar360.cameraYaw)}° • Makhluk ${moveDesc}!`;
+    statusEl.textContent = "Makhluk kabur & akan muncul kembali di peta...";
     return;
   }
 
-  if (arSession.captured) {
-    compassEl.textContent = "Tertangkap!";
+  if (ar360.captured) {
+    compassEl.textContent = `Arah ${Math.round(ar360.cameraYaw)}° • Tertangkap!`;
     return;
   }
 
-  if (isCreatureCentered()) {
-    compassEl.textContent = "🎯 Target terlihat di kamera!";
-    statusEl.textContent = "Monster terlihat! Ketuk atau swipe ↑ Orb Kristal.";
-  } else if (arSession.offsetX > 55) {
-    compassEl.textContent = "◀ Arahkan kamera HP ke KANAN untuk mencari";
-    statusEl.textContent = "Gerakkan kamera ke kanan agar monster masuk ke pandangan...";
-  } else if (arSession.offsetX < -55) {
-    compassEl.textContent = "▶ Arahkan kamera HP ke KIRI untuk mencari";
-    statusEl.textContent = "Gerakkan kamera ke kiri agar monster masuk ke pandangan...";
+  // Radar ping audio yang makin cepat saat kamera makin mengarah ke monster
+  const now = Date.now();
+  const proximity = Math.max(0, 1 - absYaw / 180);
+  const pingInterval = Math.max(260, 1150 - proximity * 850);
+  if (now - lastPingTime > pingInterval) {
+    lastPingTime = now;
+    playSound("radarPing", proximity);
+  }
+
+  if (absYaw <= 24) {
+    compassEl.textContent = `Kamera ${Math.round(ar360.cameraYaw)}° • 🎯 Monster di depan kamera!`;
+    statusEl.textContent = "Monster terlihat jelas! Ketuk atau swipe ↑ Orb Kristal.";
+  } else if (absYaw > 135) {
+    compassEl.textContent = `Kamera ${Math.round(ar360.cameraYaw)}° • 🔄 Monster ada di BELAKANG (putar kamera!)`;
+    statusEl.textContent = "Putar badan / pegang kamera memutar ke belakang untuk menemukannya!";
+  } else if (relYaw > 24) {
+    compassEl.textContent = `Kamera ${Math.round(ar360.cameraYaw)}° • ↻ Putar kamera ke KANAN (${Math.round(absYaw)}°)`;
+    statusEl.textContent = "Putar kamera ke kanan hingga monster masuk ke layar...";
   } else {
-    compassEl.textContent = "↕ Gerakkan kamera HP perlahan untuk mengunci target";
-    statusEl.textContent = "Mencari monster di sekitar kamera...";
+    compassEl.textContent = `Kamera ${Math.round(ar360.cameraYaw)}° • ↺ Putar kamera ke KIRI (${Math.round(absYaw)}°)`;
+    statusEl.textContent = "Putar kamera ke kiri hingga monster masuk ke layar...";
   }
 }
 
-function startFleeAndRespawn(reasonLabel = "Monster kabur!") {
-  if (arSession.fleeing || arSession.captured || !selectedCreature) return;
+function startFleeAndRespawn(reasonText = "Monster kabur!") {
+  if (ar360.fleeing || ar360.captured || !selectedCreature) return;
 
-  arSession.fleeing = true;
-  arSession.fleeProgress = 0;
-  arSession.fleeDirX = Math.random() < 0.5 ? 1 : -1;
-  arSession.fleeDirY = selectedCreature.moveType === "fly" ? -0.95 : 0.25;
+  ar360.fleeing = true;
+  ar360.fleeProgress = 0;
+  ar360.fleeDirX = Math.random() < 0.5 ? 1 : -1;
+  ar360.fleeDirY = selectedCreature.moveType === "fly" ? -0.95 : 0.25;
 
   playSound(selectedCreature.moveType === "fly" ? "flee_fly" : "flee_run");
-  updateCompassHint();
+  update360Hud();
   document.getElementById("hunt-status").textContent =
-    `${reasonLabel} Akan muncul kembali di peta...`;
+    `${reasonText} Muncul kembali di peta beberapa saat lagi...`;
 
   if (selectedCreature.marker && map) {
     map.removeLayer(selectedCreature.marker);
@@ -537,87 +630,93 @@ function startFleeAndRespawn(reasonLabel = "Monster kabur!") {
   }, 1350);
 }
 
-function evadeWithinView() {
-  if (arSession.fleeing || arSession.captured || !selectedCreature) return;
+function evadeToAnotherAngle() {
+  if (ar360.fleeing || ar360.captured || !selectedCreature) return;
 
-  arSession.misses += 1;
+  ar360.misses += 1;
   const maxMisses = selectedCreature.fleeAfterMisses || 3;
 
-  if (arSession.misses >= maxMisses) {
+  if (ar360.misses >= maxMisses) {
     startFleeAndRespawn(`${selectedCreature.name} menghilang kabur!`);
     return;
   }
 
-  const dir = arSession.offsetX >= 0 ? -1 : 1;
-  arSession.targetX = dir * (165 + Math.random() * 45);
-  arSession.targetY = (Math.random() - 0.5) * 80;
+  // Berpindah sudut 360° (bisa ke kiri, kanan, atau belakang)
+  const shift = (Math.random() < 0.5 ? 1 : -1) * (95 + Math.random() * 85);
+  ar360.creatureYaw = normalize360(ar360.creatureYaw + shift);
   playSound("evade");
   document.getElementById("hunt-status").textContent =
-    `${selectedCreature.name} menghindar (${arSession.misses}/${maxMisses}) — gerakkan kamera lagi!`;
+    `${selectedCreature.name} menghindar (${ar360.misses}/${maxMisses}) — putar kamera lagi!`;
 }
 
-function startArLoop() {
+function start360Loop() {
   const canvas = document.getElementById("creature-canvas");
   const ctx = canvas.getContext("2d");
 
   const render = () => {
-    if (!arSession.active) return;
-    arSession.time += 0.035;
+    if (!ar360.active) return;
+    ar360.time += 0.035;
 
     sampleCameraMotion();
 
-    if (arSession.fleeing) {
-      arSession.fleeProgress = Math.min(1, arSession.fleeProgress + 0.025);
-    } else {
-      arSession.offsetX += (arSession.targetX - arSession.offsetX) * 0.12;
-      arSession.offsetY += (arSession.targetY - arSession.offsetY) * 0.12;
+    if (ar360.fleeing) {
+      ar360.fleeProgress = Math.min(1, ar360.fleeProgress + 0.025);
     }
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (selectedCreature) {
-      drawAnimalCreature(
+    const relYaw = getRelativeYaw();
+    // Tampilkan di canvas saat selisih sudut berada dalam jangkauan pandang kamera (-65°..+65°)
+    if (selectedCreature && Math.abs(relYaw) <= 65) {
+      const screenX = canvas.width / 2 + (relYaw / 65) * 125;
+      const screenY = canvas.height / 2 + ar360.cameraPitch;
+
+      drawAnimal360(
         ctx,
         selectedCreature,
-        canvas.width / 2 + arSession.offsetX,
-        canvas.height / 2 + arSession.offsetY,
-        arSession.time,
-        arSession.fleeProgress,
-        arSession.fleeDirX,
-        arSession.fleeDirY
+        screenX,
+        screenY,
+        ar360.time,
+        ar360.fleeProgress,
+        ar360.fleeDirX,
+        ar360.fleeDirY
       );
     }
 
-    updateCompassHint();
-    arSession.animFrameId = requestAnimationFrame(render);
+    update360Hud();
+    ar360.animFrameId = requestAnimationFrame(render);
   };
 
-  arSession.animFrameId = requestAnimationFrame(render);
+  ar360.animFrameId = requestAnimationFrame(render);
 
-  // Jika tidak ditangkap dalam 18 detik, monster berlari/terbang menjauh & bisa muncul lagi di peta
-  if (arSession.fleeTimeoutId) clearTimeout(arSession.fleeTimeoutId);
-  arSession.fleeTimeoutId = setTimeout(() => {
-    if (!arSession.captured && !arSession.fleeing) {
+  if (ar360.fleeTimeoutId) clearTimeout(ar360.fleeTimeoutId);
+  ar360.fleeTimeoutId = setTimeout(() => {
+    if (!ar360.captured && !ar360.fleeing) {
       startFleeAndRespawn("Waktu habis, monster kabur!");
     }
-  }, 18000);
+  }, 20000);
 }
 
 document.getElementById("open-cam-btn").addEventListener("click", async () => {
   if (!selectedCreature) return;
   unlockAudio();
-  await requestMotionPermissionIfNeeded();
-  playSound("scan");
+  await requestOrientationPermission();
+  playSound("scan360");
 
-  const startSide = Math.random() < 0.5 ? 195 : -195;
-  arSession = {
+  // Mulai menghadap 0° sementara makhluk ada di spawnAngleDeg (misalnya 180° di belakang)
+  const initialAngle =
+    typeof selectedCreature.spawnAngleDeg === "number"
+      ? selectedCreature.spawnAngleDeg
+      : 180;
+
+  ar360 = {
     active: true,
-    offsetX: startSide,
-    offsetY: (Math.random() - 0.5) * 60,
-    targetX: startSide,
-    targetY: (Math.random() - 0.5) * 60,
-    baseGamma: null,
-    baseBeta: null,
+    cameraYaw: 0,
+    cameraPitch: 0,
+    creatureYaw: normalize360(initialAngle),
+    baseAlpha: null,
+    lastGamma: null,
+    lastBeta: null,
     misses: 0,
     fleeing: false,
     fleeProgress: 0,
@@ -638,28 +737,11 @@ document.getElementById("open-cam-btn").addEventListener("click", async () => {
   document.getElementById("hunt-view").classList.remove("hidden");
 
   await openCamera();
-  startArLoop();
-});
-
-// Gerakan orientasi kamera/perangkat HP (DeviceOrientationEvent)
-window.addEventListener("deviceorientation", (e) => {
-  if (!arSession.active || arSession.fleeing || e.gamma === null) return;
-
-  if (arSession.baseGamma === null) {
-    arSession.baseGamma = e.gamma;
-    arSession.baseBeta = e.beta !== null ? e.beta : 60;
-  }
-
-  const deltaGamma = e.gamma - arSession.baseGamma;
-  const deltaBeta = e.beta !== null ? e.beta - arSession.baseBeta : 0;
-
-  arSession.targetX = Math.max(-210, Math.min(210, arSession.targetX - deltaGamma * 0.35));
-  arSession.targetY = Math.max(-100, Math.min(100, arSession.targetY - deltaBeta * 0.2));
-  arSession.baseGamma = e.gamma;
-  if (e.beta !== null) arSession.baseBeta = e.beta;
+  start360Loop();
 });
 
 document.getElementById("run-away-btn").addEventListener("click", () => {
+  playSound("fail");
   closeCamera();
   document.getElementById("hunt-view").classList.add("hidden");
   selectedCreature = null;
@@ -674,11 +756,11 @@ function triggerShine() {
 }
 
 function throwCrystalOrb() {
-  if (!selectedCreature || isThrowingOrb || arSession.fleeing || arSession.captured) return;
+  if (!selectedCreature || isThrowingOrb || ar360.fleeing || ar360.captured) return;
 
   const statusEl = document.getElementById("hunt-status");
-  if (!isCreatureCentered()) {
-    statusEl.textContent = "Gerakkan kamera HP hingga monster berada di tengah bidikan!";
+  if (!isInFrontOfCamera()) {
+    statusEl.textContent = "Putar kamera HP hingga monster berada tepat di depan kamera!";
     playSound("fail");
     return;
   }
@@ -697,13 +779,13 @@ function throwCrystalOrb() {
     const evaded = Math.random() < (selectedCreature.evadeChance || 0.45);
     if (evaded) {
       isThrowingOrb = false;
-      evadeWithinView();
+      evadeToAnotherAngle();
       return;
     }
 
     const success = Math.random() < 0.78;
     if (success) {
-      arSession.captured = true;
+      ar360.captured = true;
       selectedCreature.caught = true;
       if (selectedCreature.marker && map) {
         map.removeLayer(selectedCreature.marker);
@@ -719,7 +801,7 @@ function throwCrystalOrb() {
       });
       saveState();
 
-      playSound("win");
+      playSound("caught");
       triggerShine();
       if (navigator.vibrate) navigator.vibrate([120, 60, 180]);
       statusEl.textContent = `✨ Bersinar! ${selectedCreature.name} berhasil ditangkap (+${selectedCreature.points} pts)!`;
@@ -729,10 +811,10 @@ function throwCrystalOrb() {
         document.getElementById("hunt-view").classList.add("hidden");
         selectedCreature = null;
         isThrowingOrb = false;
-      }, 1350);
+      }, 1450);
     } else {
       isThrowingOrb = false;
-      evadeWithinView();
+      evadeToAnotherAngle();
     }
   }, 650);
 }
@@ -753,6 +835,7 @@ orbEl.addEventListener("touchend", (e) => {
 });
 
 document.getElementById("radar-btn").addEventListener("click", () => {
+  playSound("scan360");
   if (playerCoords && map) spawnNearRadar(playerCoords.lat, playerCoords.lng);
 });
 
@@ -870,7 +953,9 @@ function startLocationTracking() {
 
 document.getElementById("start-game-btn").addEventListener("click", async () => {
   unlockAudio();
-  await requestMotionPermissionIfNeeded();
+  await requestOrientationPermission();
+  playSound("start");
+
   document.getElementById("intro-screen").classList.add("hidden");
   document.getElementById("top-hud").classList.remove("hidden");
 
